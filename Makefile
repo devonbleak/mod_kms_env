@@ -14,7 +14,7 @@ APACHECTL=apachectl
 #   additional defines, includes and libraries
 #DEFS=-Dmy_define=my_value
 #INCLUDES=-Imy/include/dir
-#LIBS=-Lmy/lib/dir -lmylib
+LDFLAGS=-ljson-c -lcrypto -lcurl
 
 #   the default target
 all: local-shared-build

@@ -681,10 +681,6 @@ static const command_rec kms_env_cmds[] = {
 static int fixup_kms_env_module(request_rec *r)
 {
 	kms_env_dir_config *sconf = ap_get_module_config(r->per_dir_config, &kms_env_module);
-	// add a test variable
-	// TODO remove me
-	if(!apr_table_get(sconf->vars, "test"))
-		apr_table_setn(sconf->vars, "test", "foo");
 
 	if(apr_is_empty_table(sconf->vars))
 		return DECLINED;

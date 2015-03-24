@@ -43,12 +43,12 @@
 #include "http_request.h"
 #include "http_log.h"
 #include "ap_config.h"
-#include <string.h>
 #include <curl/curl.h>
 #include <json/json.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include "apr_strings.h"
+#include <string.h>
 #include "apr_base64.h"
 #include "ctype.h"
 
@@ -70,11 +70,11 @@ static struct
 } creds;
 
 // buffer for capturing curl responses
-static struct memstruct
+struct memstruct
 {
 	char *data;
 	size_t size;
-} curlmemstruct;
+};
 
 const char *local_region = NULL;
 
@@ -103,6 +103,7 @@ int init_aws_creds_from_role()
 	json_object *credobj, *tmpobj;
 	json_bool jsonret;
 	CURLcode res;
+	struct memstruct curlmemstruct;
 	char credpath[256] = "http://169.254.169.254/2014-11-05/meta-data/iam/security-credentials/";
 
 	// curl for the name of our credentials
@@ -217,15 +218,17 @@ static apr_array_header_t *get_apr_table_keys(apr_pool_t *pool, apr_table_t *tab
 }
 
 // combo of an apr memory pool and curl_slist
-static struct {
+struct pool_slist_ {
 	apr_pool_t *pool;
 	struct curl_slist *slist;
-} pool_slist;
+};
 
 // convert apr_table into curl slist for setting HTTP headers
 static int _header_table_to_slist_callback(void *data, const char *key, const char *value)
 {
-	pool_slist.slist = curl_slist_append(pool_slist.slist, apr_pstrcat(pool_slist.pool, key, ": ", value, NULL));
+	struct pool_slist_ *pool_slist = data;
+
+	pool_slist->slist = curl_slist_append(pool_slist->slist, apr_pstrcat(pool_slist->pool, key, ": ", value, NULL));
 
 	return 1;
 }
@@ -285,6 +288,7 @@ const char *init_local_region()
 	CURLcode crv;
 	json_object *idobj, *tmpobj;
 	json_bool jrv;
+	struct memstruct curlmemstruct;
 
 	ch = curl_easy_init();
 	curl_easy_setopt(ch, CURLOPT_URL, url);
@@ -322,6 +326,7 @@ const char *get_local_region()
 }
 
 CURLcode execute_signed_aws_request(
+		apr_pool_t *pool,
 		long *response_code,
 		char **return_data,
 		size_t *return_size,
@@ -338,14 +343,14 @@ CURLcode execute_signed_aws_request(
 {
 	CURL *ch;
 	CURLcode status;
+	struct pool_slist_ *pool_slist;
 	const char *region, *hostname;
 	char *canonical_request, *signed_headers, *string_to_sign, *request_signature, *tmpcp;
-	apr_pool_t *pool;
 	apr_table_t *realheaders;
-	apr_status_t aprv;
 	time_t now;
 	apr_array_header_t *header_keys;
 	int i;
+	struct memstruct curlmemstruct;
 	unsigned int md_len;
 	unsigned char md_value[EVP_MAX_MD_SIZE];
 	char datetime[32], today[9];
@@ -356,15 +361,6 @@ CURLcode execute_signed_aws_request(
 		*return_data = "Query Parameters are not supported (yet).";
 		*return_size = strlen(*return_data);
 		return CURLE_UNSUPPORTED_PROTOCOL;
-	}
-
-	// create a memory pool
-	aprv = apr_pool_create(&pool, NULL);
-	if(aprv != APR_SUCCESS)
-	{
-		*return_data = "Could not create pool.";
-		*return_size = strlen(*return_data);
-		return CURLE_OUT_OF_MEMORY;
 	}
 
 	// try a default region
@@ -381,7 +377,7 @@ CURLcode execute_signed_aws_request(
 
 	// build the canonical request
 	/*
-	CanonicalRequest =
+	   CanonicalRequest =
 	  HTTPRequestMethod + '\n' +
 	  CanonicalURI + '\n' +
 	  CanonicalQueryString + '\n' +
@@ -492,6 +488,7 @@ CURLcode execute_signed_aws_request(
 
 	// build the actual request
 	ch = curl_easy_init();
+	curl_easy_setopt(ch, CURLOPT_SSL_VERIFYPEER, 0L);
 	curl_easy_setopt(ch, CURLOPT_URL, apr_pstrcat(pool, "https://", hostname, path, NULL));
 
 	// for now treat everything like a POST
@@ -504,10 +501,11 @@ CURLcode execute_signed_aws_request(
 	}
 
 	// set request headers
-	pool_slist.pool = pool;
-	pool_slist.slist = NULL;
-	apr_table_do(_header_table_to_slist_callback, NULL, realheaders, NULL);
-	curl_easy_setopt(ch, CURLOPT_HTTPHEADER, pool_slist.slist);
+	pool_slist = apr_palloc(pool, sizeof(*pool_slist));
+	pool_slist->pool = pool;
+	pool_slist->slist = NULL;
+	apr_table_do(_header_table_to_slist_callback, pool_slist, realheaders, NULL);
+	curl_easy_setopt(ch, CURLOPT_HTTPHEADER, pool_slist->slist);
 
 	// capture the output in curlmemstruct
 	curlmemstruct.data = malloc(sizeof(char));
@@ -528,10 +526,9 @@ CURLcode execute_signed_aws_request(
 	*return_size = curlmemstruct.size;
 
 	// clean up
-	curl_slist_free_all(pool_slist.slist);
+	curl_slist_free_all(pool_slist->slist);
 	curl_easy_cleanup(ch);
 	free(curlmemstruct.data);
-	apr_pool_destroy(pool);
 
 	return status;
 }
@@ -606,6 +603,7 @@ static const char *add_kms_env_module_vars_set(cmd_parms *cmd, void *sconf_, con
 	apr_table_setn(headers, "X-Amz-Target", "TrentService.Decrypt");
 
 	crv = execute_signed_aws_request(
+			cmd->temp_pool,
 			&kms_response_code,
 			&kms_result,
 			&kms_result_len,
@@ -692,6 +690,13 @@ static int fixup_kms_env_module(request_rec *r)
 
 static int pre_config_kms_env_module(apr_pool_t *p, apr_pool_t *plog, apr_pool_t *ptemp)
 {
+	CURLcode rv = curl_global_init(CURL_GLOBAL_ALL);
+	if(rv != CURLE_OK)
+	{
+		ap_log_perror(APLOG_MARK, APLOG_ERR, 0, plog, apr_psprintf(plog, "Could not initialize curl: %s", curl_easy_strerror(rv)));
+		return 1;
+	}
+
 	if(init_aws_creds_from_role() != 0)
 	{
 		ap_log_perror(APLOG_MARK, APLOG_ERR, 0, plog, "Could not initialize AWS role credentials.");
@@ -701,9 +706,17 @@ static int pre_config_kms_env_module(apr_pool_t *p, apr_pool_t *plog, apr_pool_t
 	return DECLINED;
 }
 
+static int post_config_kms_env_module(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s)
+{
+	curl_global_cleanup();
+
+	return DECLINED;
+}
+
 static void kms_env_register_hooks(apr_pool_t *p)
 {
 	ap_hook_pre_config(pre_config_kms_env_module, NULL, NULL, APR_HOOK_FIRST);
+	ap_hook_post_config(post_config_kms_env_module, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_fixups(fixup_kms_env_module, NULL, NULL, APR_HOOK_MIDDLE);
 }
 

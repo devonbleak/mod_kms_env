@@ -619,7 +619,7 @@ static const char *add_kms_env_module_vars_set(cmd_parms *cmd, void *sconf_, con
 			);
 
 	if(crv != CURLE_OK)
-		return apr_psprintf(cmd->temp_pool, "Could not make decryption requset: %s", curl_easy_strerror(crv));
+		return apr_psprintf(cmd->temp_pool, "Could not make decryption request: %s", curl_easy_strerror(crv));
 
 	if(kms_response_code != HTTP_OK)
 		return apr_psprintf(cmd->temp_pool, "Could not decrypt value: %s", kms_result);

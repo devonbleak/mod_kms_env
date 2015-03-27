@@ -717,7 +717,7 @@ static void kms_env_register_hooks(apr_pool_t *p)
 {
 	ap_hook_pre_config(pre_config_kms_env_module, NULL, NULL, APR_HOOK_FIRST);
 	ap_hook_post_config(post_config_kms_env_module, NULL, NULL, APR_HOOK_MIDDLE);
-    ap_hook_fixups(fixup_kms_env_module, NULL, NULL, APR_HOOK_MIDDLE);
+	ap_hook_fixups(fixup_kms_env_module, NULL, NULL, APR_HOOK_MIDDLE);
 }
 
 /* Dispatch list for API hooks */

@@ -488,7 +488,8 @@ CURLcode execute_signed_aws_request(
 
 	// build the actual request
 	ch = curl_easy_init();
-	curl_easy_setopt(ch, CURLOPT_SSL_VERIFYPEER, 0L);
+	curl_easy_setopt(ch, CURLOPT_SSL_VERIFYPEER, 1L);
+	curl_easy_setopt(ch, CURLOPT_SSL_VERIFYHOST, 2L);
 	curl_easy_setopt(ch, CURLOPT_URL, apr_pstrcat(pool, "https://", hostname, path, NULL));
 
 	// for now treat everything like a POST
@@ -521,7 +522,7 @@ CURLcode execute_signed_aws_request(
 	*response_code = -1;
 	if(status == CURLE_OK)
 		curl_easy_getinfo(ch, CURLINFO_RESPONSE_CODE, response_code);
-	*return_data = calloc(curlmemstruct.size, 1);
+	*return_data = calloc(curlmemstruct.size + 1, 1);
 	memcpy(*return_data, curlmemstruct.data, curlmemstruct.size);
 	*return_size = curlmemstruct.size;
 
